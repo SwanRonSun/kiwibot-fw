@@ -19,6 +19,15 @@ void DrvHal::updateOutputs() {
   Serial.print(buf);
 }
 
+void DrvHal::spinToward(int16_t angleDeg) {
+  // Simple proportional turn: full speed at |180°|, zero at 0°
+  int8_t pwm = (int8_t)constrain(angleDeg / 2, -100, 100);  // scale gain = 0.5
+  int8_t v[3] = { pwm, pwm, pwm };  // all wheels same sign → pure rotation
+  setWheelSpeeds(v);
+  updateOutputs();
+}
+
+
 /*  <<< THIS BLOCK IS THE ONE THE LINKER IS COMPLAINING ABOUT >>> */
 void DrvHal::stop() {
   int8_t zero[3] = {0, 0, 0};
