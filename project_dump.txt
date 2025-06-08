@@ -1,0 +1,808 @@
+
+=== platformio.ini ===
+; PlatformIO Project Configuration File
+;
+;   Build options: build flags, source filter
+;   Upload options: custom upload port, speed and extra flags
+;   Library options: dependencies, extra library storages
+;   Advanced options: extra scripting
+;
+; Please visit documentation for the other options and examples
+; https://docs.platformio.org/page/projectconf.html
+
+[env:nanoatmega328]
+platform = atmelavr
+board = nanoatmega328
+framework = arduino
+
+=== project_dump.txt ===
+
+=== docs\safety_checklist.md ===
+# Safety Verification Checklist
+
+## 1. Power & Fusing
+- [ ] Li-Po battery mounted in fire-safe bag  
+- [ ] 5 A fuse installed on main battery lead  
+- [ ] Master switch kills all power  
+
+## 2. Failsafe & Dead-man
+- [ ] Radio failsafe wired to MCU — drive & spike disabled on loss  
+- [ ] Lid-switch interrupt cuts power to drive & weapon  
+- [ ] MCU brown-out detection (built-in AVR) prevents errant code  
+
+## 3. Weapon Containment
+- [ ] Spike stroke < 25 mm, no projectiles  
+- [ ] Weapon solenoid tied to failsafe line  
+- [ ] Spike never leaves chassis envelope  
+
+## 4. Drive Safety
+- [ ] Maximum continuous current < 3 A per motor  
+- [ ] Drive motors braked within < 300 ms on failsafe  
+- [ ] Omni-wheel hubs securely fastened (no pop-outs)  
+
+## 5. Software Safety
+- [ ] `failsafe.poll()` runs every loop()  
+- [ ] No dynamic memory allocation in firmware  
+- [ ] Closed-source Wi-Fi disabled (XIAO boards inference only)  
+
+## 6. Documentation
+- [ ] Open-source CAD & firmware repo link included  
+- [ ] Build & flash instructions in README  
+- [ ] This checklist printed & signed at inspection  
+
+
+=== include\README ===
+
+This directory is intended for project header files.
+
+A header file is a file containing C declarations and macro definitions
+to be shared between several project source files. You request the use of a
+header file in your project source file (C, C++, etc) located in `src` folder
+by including it, with the C preprocessing directive `#include'.
+
+```src/main.c
+
+#include "header.h"
+
+int main (void)
+{
+ ...
+}
+```
+
+Including a header file produces the same results as copying the header file
+into each source file that needs it. Such copying would be time-consuming
+and error-prone. With a header file, the related declarations appear
+in only one place. If they need to be changed, they can be changed in one
+place, and programs that include the header file will automatically use the
+new version when next recompiled. The header file eliminates the labor of
+finding and changing all the copies as well as the risk that a failure to
+find one copy will result in inconsistencies within a program.
+
+In C, the convention is to give header files names that end with `.h'.
+
+Read more about using header files in official GCC documentation:
+
+* Include Syntax
+* Include Operation
+* Once-Only Headers
+* Computed Includes
+
+https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html
+
+=== lib\README ===
+
+This directory is intended for project specific (private) libraries.
+PlatformIO will compile them to static libraries and link into the executable file.
+
+The source code of each library should be placed in a separate directory
+("lib/your_library_name/[Code]").
+
+For example, see the structure of the following example libraries `Foo` and `Bar`:
+
+|--lib
+|  |
+|  |--Bar
+|  |  |--docs
+|  |  |--examples
+|  |  |--src
+|  |     |- Bar.c
+|  |     |- Bar.h
+|  |  |- library.json (optional. for custom build options, etc) https://docs.platformio.org/page/librarymanager/config.html
+|  |
+|  |--Foo
+|  |  |- Foo.c
+|  |  |- Foo.h
+|  |
+|  |- README --> THIS FILE
+|
+|- platformio.ini
+|--src
+   |- main.c
+
+Example contents of `src/main.c` using Foo and Bar:
+```
+#include <Foo.h>
+#include <Bar.h>
+
+int main (void)
+{
+  ...
+}
+
+```
+
+The PlatformIO Library Dependency Finder will find automatically dependent
+libraries by scanning project source files.
+
+More information about PlatformIO Library Dependency Finder
+- https://docs.platformio.org/page/librarymanager/ldf.html
+
+=== lib\cam_mux\cam_mux.cpp ===
+/*
+ * cam_mux.cpp – dual-camera packet parser (always includes test hook)
+ */
+
+#include "cam_mux.h"
+#include <SoftwareSerial.h>
+
+namespace {
+
+// ← LEFT camera (hardware Serial) globals
+volatile int16_t l_ang = 0, l_rng = 32767;
+uint8_t  l_buf[4];
+uint8_t  l_idx = 0;
+
+// ← RIGHT camera (SoftwareSerial) globals
+static SoftwareSerial* rSer = nullptr;
+volatile int16_t r_ang = 0, r_rng = 32767;
+uint8_t  r_buf[4];
+uint8_t  r_idx = 0;
+
+// Push one byte into buf; once 4 bytes are in, unpack into (ang, rng)
+inline void pushByte(uint8_t b, uint8_t& idx, uint8_t* buf,
+                     volatile int16_t& ang, volatile int16_t& rng) {
+    buf[idx++] = b;
+    if (idx == 4) {
+        ang = static_cast<int16_t>(buf[0] | (buf[1] << 8));
+        rng = static_cast<int16_t>(buf[2] | (buf[3] << 8));
+        idx = 0;
+    }
+}
+
+}  // end anonymous namespace
+
+// Initialize left (Serial) and right (SoftwareSerial) cameras
+void CamMux::init(uint32_t baudLeft,
+                  uint32_t baudRight,
+                  uint8_t  rightRxPin) {
+    Serial.begin(baudLeft);
+    rSer = new SoftwareSerial(rightRxPin, 255);  // RX only
+    rSer->begin(baudRight);
+}
+
+// Poll both streams for new packets
+void CamMux::poll() {
+    while (Serial.available()) {
+        pushByte(Serial.read(), l_idx, l_buf, l_ang, l_rng);
+    }
+    if (rSer) {
+        while (rSer->available()) {
+            pushByte(rSer->read(), r_idx, r_buf, r_ang, r_rng);
+        }
+    }
+}
+
+// Accessors
+int16_t CamMux::leftAngle()     { return l_ang; }
+int16_t CamMux::leftRange()     { return l_rng; }
+int16_t CamMux::rightAngle()    { return r_ang; }
+int16_t CamMux::rightRange()    { return r_rng; }
+
+int16_t CamMux::selectedAngle() {
+    return (l_rng <= r_rng) ? l_ang : r_ang;
+}
+int16_t CamMux::selectedRange() {
+    return (l_rng <= r_rng) ? l_rng : r_rng;
+}
+
+//────────────────────────────────────────────────────────────────
+// TEST-ONLY hook: override left-camera values directly for tests
+//────────────────────────────────────────────────────────────────
+void CamMux::_test_setLeft(int16_t angle, int16_t range) {
+    l_ang = angle;
+    l_rng = range;
+}
+
+=== lib\cam_mux\cam_mux.h ===
+#pragma once
+#include <Arduino.h>
+
+namespace CamMux {
+
+/**
+ * Initialize both camera streams.
+ *
+ * Left camera uses hardware Serial (RX0) at a default of 115200 baud.
+ * Right camera uses SoftwareSerial on the specified pin at a default of 250000 baud.
+ *
+ * @param baud_left    Baud rate for the left (hardware) serial port.
+ * @param baud_right   Baud rate for the right (software) serial port.
+ * @param right_rx_pin Digital pin number to use as RX for the right camera.
+ */
+void init(uint32_t baud_left   = 115200,
+          uint32_t baud_right  = 250000,
+          uint8_t  right_rx_pin = 2);
+
+/** Must be called in loop(): reads and parses any incoming 4-byte packets. */
+void poll();
+
+/** Get the latest packet values from each camera. */
+int16_t leftAngle();    // degrees, –180 … +180
+int16_t leftRange();    // millimeters
+int16_t rightAngle();
+int16_t rightRange();
+
+/**
+ * Of the two cameras, which one has the nearer range?
+ * Returns the corresponding angle or range.
+ */
+int16_t selectedAngle();
+int16_t selectedRange();
+
+/**
+ * TEST-ONLY: override the left-camera packet values directly.
+ * Allows unit tests to drive state logic without needing externs.
+ */
+void _test_setLeft(int16_t angle, int16_t range);
+
+}  // namespace CamMux
+
+=== lib\drv8833_hal\drv8833_hal.cpp ===
+#include "drv8833_hal.h"
+#include <stdio.h>            // for snprintf
+
+static int8_t pending[3] = {0, 0, 0};
+
+void DrvHal::init() {
+  Serial.begin(115200);
+}
+
+void DrvHal::setWheelSpeeds(const int8_t pwm[3]) {
+  memcpy(pending, pwm, 3);
+}
+
+void DrvHal::updateOutputs() {
+  char buf[48];
+  snprintf(buf, sizeof(buf),
+           "Wheels PWM = [%+4d %+4d %+4d]\n",
+           pending[0], pending[1], pending[2]);
+  Serial.print(buf);
+}
+
+void DrvHal::spinToward(int16_t angleDeg) {
+  // Simple proportional turn: full speed at |180°|, zero at 0°
+  int8_t pwm = (int8_t)constrain(angleDeg / 2, -100, 100);  // scale gain = 0.5
+  int8_t v[3] = { pwm, pwm, pwm };  // all wheels same sign → pure rotation
+  setWheelSpeeds(v);
+  updateOutputs();
+}
+
+
+/*  <<< THIS BLOCK IS THE ONE THE LINKER IS COMPLAINING ABOUT >>> */
+void DrvHal::stop() {
+  int8_t zero[3] = {0, 0, 0};
+  setWheelSpeeds(zero);
+  updateOutputs();
+}
+
+=== lib\drv8833_hal\drv8833_hal.h ===
+#pragma once
+#include <Arduino.h>
+
+namespace DrvHal {
+
+void init();                                     // call once in setup()
+void setWheelSpeeds(const int8_t pwm[3]);        // desired -127..+127
+void updateOutputs();                            // flush to hardware (mock)
+void spinToward(int16_t angleDeg);   // new – drives pure rotation
+void stop();                                     // immediate all-stop
+
+} // namespace DrvHal
+
+=== lib\failsafe\failsafe.cpp ===
+#include "failsafe.h"
+#include "drv8833_hal.h"   // we need to stop motors
+
+volatile bool Failsafe::tripped = false;
+
+void Failsafe::init() {
+  Serial.println("Failsafe armed.  Press 'k' to kill.");
+}
+
+void Failsafe::poll() {
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'k' || c == 'K') {
+      tripped = true;
+      DrvHal::stop();
+      Serial.println("** FAILSAFE TRIPPED **  Wheels set to 0");
+    }
+    // purge any CR/LF that might follow
+  }
+}
+
+=== lib\failsafe\failsafe.h ===
+#pragma once
+#include <Arduino.h>
+
+namespace Failsafe {
+
+void init();          // call once in setup()
+void poll();          // call every loop() iteration
+
+extern volatile bool tripped;   // global flag any module can check
+}
+
+=== lib\orbit_controller\orbit_controller.cpp ===
+#include "orbit_controller.h"
+
+namespace {
+  double Kp = 0.0, Ki = 0.0, Kd = 0.0;
+  double integral = 0.0;
+  double prevError = 0.0;
+}
+
+void OrbitController::init(double p, double i, double d) {
+  Kp = p; Ki = i; Kd = d;
+  integral = 0.0;
+  prevError = 0.0;
+}
+
+double OrbitController::compute(double error, double dt) {
+  integral += error * dt;
+  double derivative = (dt > 0.0) ? (error - prevError) / dt : 0.0;
+  double output = Kp * error + Ki * integral + Kd * derivative;
+  prevError = error;
+  return output;
+}
+
+=== lib\orbit_controller\orbit_controller.h ===
+#pragma once
+
+namespace OrbitController {
+
+/**
+ * Initialize PID gains.
+ * @param kp Proportional gain
+ * @param ki Integral gain
+ * @param kd Derivative gain
+ */
+void init(double kp, double ki, double kd);
+
+/**
+ * Compute control output for a given error and timestep.
+ * @param error Error term (e.g. angle error in degrees)
+ * @param dt    Time since last call, in seconds
+ * @return PID output
+ */
+double compute(double error, double dt);
+
+}  // namespace OrbitController
+
+=== lib\state_machine\state_machine.cpp ===
+#include "state_machine.h"
+#include "cam_mux.h"
+#include "strike_hal.h"
+#include "drv8833_hal.h"   // for spinToward()
+
+using namespace StateMachine;
+
+namespace {
+  // Current state and entry timestamp
+  State    s      = State::IDLE;
+  uint32_t tEntry = 0;
+}
+
+void StateMachine::init() {
+  // Initialize strike system and timestamp
+  StrikeHal::init();
+  tEntry = millis();
+}
+
+void StateMachine::run() {
+  // Update strike cooldown
+  StrikeHal::poll();
+
+  switch (s) {
+
+    case State::IDLE:
+      if (CamMux::selectedRange() < 1000) {      // target within 1 m?
+        s      = State::ACQUIRE;
+        tEntry = millis();
+      }
+      break;
+
+    case State::ACQUIRE:
+      if (millis() - tEntry > 1000) {            // locked for 1 s?
+        s      = State::ORBIT;
+        tEntry = millis();
+      }
+      break;
+
+    case State::ORBIT:
+      // Rotate toward the target angle
+      DrvHal::spinToward(CamMux::selectedAngle());
+
+      // If aligned and close, go strike
+      if (abs(CamMux::selectedAngle()) < 10 &&  // within ±10°
+          CamMux::selectedRange()  < 120) {     // within 12 cm
+        s      = State::STRIKE;
+        tEntry = millis();
+      }
+      break;
+
+    case State::STRIKE:
+      // Attempt the strike (prints “>>> BANG! <<<” if off cooldown)
+      StrikeHal::fire();
+
+      // After the jab window, return to orbit
+      if (millis() - tEntry > 200) {            // 200 ms jab window
+        s      = State::ORBIT;
+        tEntry = millis();
+      }
+      break;
+  }
+}
+
+State StateMachine::current() {
+  return s;
+}
+
+=== lib\state_machine\state_machine.h ===
+#pragma once
+#include <Arduino.h>
+
+namespace StateMachine {
+
+enum class State : uint8_t { IDLE, ACQUIRE, ORBIT, STRIKE };
+
+void init();   // call once in setup()
+void run();    // call every loop()
+
+State current();  // helper to print/log
+
+}  // namespace StateMachine
+
+=== lib\strike_hal\strike_hal.cpp ===
+#include "strike_hal.h"
+
+namespace StrikeHal {
+
+static const uint32_t COOLDOWN_MS = 500;  // half-second between strikes
+static uint32_t lastStrikeTime = 0;
+static bool ready = false;
+
+void init() {
+  ready = true;
+  lastStrikeTime = millis() - COOLDOWN_MS;
+}
+
+bool fire() {
+  if (!ready) return false;
+  uint32_t now = millis();
+  if (now - lastStrikeTime >= COOLDOWN_MS) {
+    Serial.println(">>> BANG! <<<");
+    lastStrikeTime = now;
+    return true;
+  }
+  return false;
+}
+
+void poll() {
+  // nothing else to do now; cooldown managed in fire()
+}
+
+} // namespace StrikeHal
+
+=== lib\strike_hal\strike_hal.h ===
+#pragma once
+#include <Arduino.h>
+
+namespace StrikeHal {
+
+/**
+ * Initialize the strike system. Call once in setup().
+ */
+void init();
+
+/**
+ * Fire the spike. Only fires if not in cooldown.
+ * Returns true if the strike was actually triggered.
+ */
+bool fire();
+
+/**
+ * Must be called every loop() to update cooldown timer.
+ */
+void poll();
+  
+} // namespace StrikeHal
+
+=== src\main.cpp ===
+#include <Arduino.h>
+#include "cam_mux.h"
+#include "state_machine.h"
+
+void setup() {
+  Serial.begin(115200);
+  CamMux::init();          // left cam on RX0 @115 200 by default
+  StateMachine::init();
+}
+
+void loop() {
+  CamMux::poll();
+  StateMachine::run();
+
+  static uint32_t tPrint = 0;
+  if (millis() - tPrint > 500) {        // twice per second
+    Serial.print("State = ");
+    Serial.println(static_cast<uint8_t>(StateMachine::current())); // 0-3
+    tPrint = millis();
+  }
+}
+
+=== test\README ===
+
+This directory is intended for PlatformIO Test Runner and project tests.
+
+Unit Testing is a software testing method by which individual units of
+source code, sets of one or more MCU program modules together with associated
+control data, usage procedures, and operating procedures, are tested to
+determine whether they are fit for use. Unit testing finds problems early
+in the development cycle.
+
+More information about PlatformIO Unit Testing:
+- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+
+=== test\kiwi_ik.h ===
+#pragma once
+#include <stdint.h>
+
+/**
+ * Converts a desired Cartesian velocity (vx, vy) into
+ * three wheel PWM values in the range [-127..+127].
+ *
+ * @param vx    X velocity (right positive) as a float
+ * @param vy    Y velocity (forward positive) as a float
+ * @param out   int8_t[3] array to receive {w0, w1, w2}
+ */
+namespace KiwiIK {
+    void cartesianToWheel(float vx, float vy, int8_t out[3]);
+}
+
+=== test\test_kiwi_ik_extra.cpp ===
+#include <unity.h>
+#include "kiwi_ik.h"
+
+// shared output buffer
+static int8_t wheels[3];
+
+void test_forward() {
+  // (vx=0, vy=1) → front wheel +127, rears ≈ -63
+  KiwiIK::cartesianToWheel(0.0f, 1.0f, wheels);
+  TEST_ASSERT_EQUAL_INT(127, wheels[0]);
+  TEST_ASSERT_EQUAL_INT(-63, wheels[1]);
+  TEST_ASSERT_EQUAL_INT(-63, wheels[2]);
+}
+
+void test_strafe_right() {
+  // (vx=1, vy=0) → front=0, rear-left ≈ +109, rear-right ≈ -109
+  KiwiIK::cartesianToWheel(1.0f, 0.0f, wheels);
+  TEST_ASSERT_EQUAL_INT(0,   wheels[0]);
+  TEST_ASSERT_EQUAL_INT(109, wheels[1]);
+  TEST_ASSERT_EQUAL_INT(-109,wheels[2]);
+}
+
+void test_rotate_ccw() {
+  // (vx=1, vy=1) mixes translation+rotation; just check non-zero
+  KiwiIK::cartesianToWheel(1.0f, 1.0f, wheels);
+  TEST_ASSERT_NOT_EQUAL(0, wheels[0]);
+  TEST_ASSERT_NOT_EQUAL(0, wheels[1]);
+  TEST_ASSERT_NOT_EQUAL(0, wheels[2]);
+}
+
+void setup() {
+  UNITY_BEGIN();
+  RUN_TEST(test_forward);
+  RUN_TEST(test_strafe_right);
+  RUN_TEST(test_rotate_ccw);
+  UNITY_END();
+}
+
+void loop() {
+  // no-op
+}
+
+=== test\test_orbit_controller.cpp ===
+#include <unity.h>
+#include "orbit_controller.h"
+
+// Test zero error → zero output
+void test_zero_error() {
+  OrbitController::init(1.0, 1.0, 1.0);
+  double out = OrbitController::compute(0.0, 1.0);
+  TEST_ASSERT_EQUAL_DOUBLE(0.0, out);
+}
+
+// Test pure proportional action
+void test_proportional() {
+  OrbitController::init(2.0, 0.0, 0.0);
+  double out = OrbitController::compute(1.5, 1.0);
+  TEST_ASSERT_EQUAL_DOUBLE(3.0, out);
+}
+
+// Test integral accumulation over two steps
+void test_integral() {
+  OrbitController::init(0.0, 1.0, 0.0);
+  double out1 = OrbitController::compute(1.0, 2.0);  // integral = 2
+  TEST_ASSERT_EQUAL_DOUBLE(2.0, out1);
+  double out2 = OrbitController::compute(1.0, 3.0);  // integral = 5
+  TEST_ASSERT_EQUAL_DOUBLE(5.0, out2);
+}
+
+// Test derivative action over two steps
+void test_derivative() {
+  OrbitController::init(0.0, 0.0, 1.0);
+  double out1 = OrbitController::compute(2.0, 1.0);  // derivative = 2
+  TEST_ASSERT_EQUAL_DOUBLE(2.0, out1);
+  double out2 = OrbitController::compute(4.0, 2.0);  // derivative = (4-2)/2 = 1
+  TEST_ASSERT_EQUAL_DOUBLE(1.0, out2);
+}
+
+int main() {
+  UNITY_BEGIN();
+  RUN_TEST(test_zero_error);
+  RUN_TEST(test_proportional);
+  RUN_TEST(test_integral);
+  RUN_TEST(test_derivative);
+  return UNITY_END();
+}
+
+=== test\test_state_machine.cpp ===
+#define UNIT_TEST      // enable test hooks in cam_mux
+#include <unity.h>
+#include "state_machine.h"
+#include "cam_mux.h"
+
+// Fake millis() to control time progression in tests
+static uint32_t fakeMillis = 0;
+uint32_t millis() { return fakeMillis; }
+
+void setUp()   {}  // not used
+void tearDown(){}  // not used
+
+void test_transitions() {
+  // Start up
+  StateMachine::init();
+  TEST_ASSERT_EQUAL(StateMachine::State::IDLE, StateMachine::current());
+
+  // Simulate a target appearing at 800 mm
+  CamMux::_test_setLeft(45, 800);
+  StateMachine::run();
+  TEST_ASSERT_EQUAL(StateMachine::State::ACQUIRE, StateMachine::current());
+
+  // Advance time by 1.1 seconds
+  fakeMillis += 1100;
+  StateMachine::run();
+  TEST_ASSERT_EQUAL(StateMachine::State::ORBIT, StateMachine::current());
+
+  // Move within strike window
+  CamMux::_test_setLeft(0, 100);
+  StateMachine::run();
+  TEST_ASSERT_EQUAL(StateMachine::State::STRIKE, StateMachine::current());
+
+  // After 300 ms, should return to ORBIT
+  fakeMillis += 300;
+  StateMachine::run();
+  TEST_ASSERT_EQUAL(StateMachine::State::ORBIT, StateMachine::current());
+}
+
+int main() {
+  UNITY_BEGIN();
+  RUN_TEST(test_transitions);
+  UNITY_END();
+  return 0;
+}
+
+=== tools\bundle_project.py ===
+#!/usr/bin/env python3
+"""
+bundle_project.py
+
+Recursively walks a directory and writes every file's path and contents
+into a single text file, with clear separators.
+
+Usage:
+  python bundle_project.py --root . --output project_dump.txt
+"""
+
+import os
+import argparse
+
+def bundle(root, output_path):
+    with open(output_path, 'w', encoding='utf-8', errors='replace') as out:
+        for dirpath, dirnames, filenames in os.walk(root):
+            # skip hidden directories (e.g. .git)
+            dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+            for fname in sorted(filenames):
+                if fname.startswith('.'): 
+                    continue
+                file_path = os.path.join(dirpath, fname)
+                rel_path = os.path.relpath(file_path, root)
+                out.write(f"\n=== {rel_path} ===\n")
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                        out.write(f.read())
+                except Exception as e:
+                    out.write(f"[Error reading file: {e}]\n")
+        print(f"Bundled project into {output_path}")
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Bundle project files into one text document")
+    ap.add_argument("--root",   default=".", help="Root folder to start bundling")
+    ap.add_argument("--output", default="project_dump.txt", help="Output bundle file")
+    args = ap.parse_args()
+    bundle(args.root, args.output)
+
+=== tools\fake_cam.py ===
+#!/usr/bin/env python3
+"""
+fake_cam.py  –  stream 4-byte <int16 angle, int16 range> packets
+Usage examples
+  • Print mock packets:            python fake_cam.py --angle 30 --range 200
+  • Spam a Nano on COM6 @115200:   python fake_cam.py -p COM6 -b 115200 -Hz 50
+"""
+
+import argparse, struct, sys, time
+try:
+    import serial
+except ImportError:
+    serial = None   # printing mode doesn’t need pyserial
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-p", "--port",    help="COM port (omit to just print)", default=None)
+    ap.add_argument("-b", "--baud",    help="baud rate", type=int, default=115200)
+    ap.add_argument("--angle",         help="deg (-180…+180)",  type=int, default=45)
+    ap.add_argument("--range",         help="mm  (0…32767)",    type=int, default=180)
+    ap.add_argument("-Hz",             help="packets per second", type=float, default=10)
+    args = ap.parse_args()
+
+    payload = struct.pack("<hh", args.angle, args.range)   # little-endian int16,int16
+
+    if args.port:
+        if serial is None:
+            sys.exit("PySerial missing; run  'python -m pip install pyserial'")
+        ser = serial.Serial(args.port, args.baud, timeout=0)
+        print(f"Streaming to {args.port} @ {args.baud} baud  ({args.Hz} Hz)… Ctrl-C to stop.")
+        try:
+            while True:
+                ser.write(payload)
+                time.sleep(1/args.Hz)
+        except KeyboardInterrupt:
+            print("\nDone.")
+        finally:
+            ser.close()
+    else:
+        print("Printing packets (Ctrl-C to stop)…")
+        try:
+            while True:
+                sys.stdout.buffer.write(payload)
+                sys.stdout.flush()
+                time.sleep(1/args.Hz)
+        except KeyboardInterrupt:
+            pass
+
+if __name__ == "__main__":
+    main()

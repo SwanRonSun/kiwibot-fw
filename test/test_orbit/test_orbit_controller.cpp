@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <unity.h>
 #include "orbit_controller.h"
 
@@ -33,11 +34,17 @@ void test_derivative() {
   TEST_ASSERT_EQUAL_DOUBLE(1.0, out2);
 }
 
-int main() {
+void setup() {
+  delay(2000);  // Allow time for serial monitor
+  
   UNITY_BEGIN();
   RUN_TEST(test_zero_error);
   RUN_TEST(test_proportional);
   RUN_TEST(test_integral);
   RUN_TEST(test_derivative);
-  return UNITY_END();
+  UNITY_END();
+}
+
+void loop() {
+  // Nothing to do here
 }

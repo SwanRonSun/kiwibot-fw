@@ -21,8 +21,8 @@ void init(uint32_t baud_left   = 115200,
 void poll();
 
 /** Get the latest packet values from each camera. */
-int16_t leftAngle();    // degrees, –180 … +180
-int16_t leftRange();    // millimeters
+int16_t leftAngle();    // degrees, –180 … +180 (0 if timed out)
+int16_t leftRange();    // millimeters (32767 if timed out)
 int16_t rightAngle();
 int16_t rightRange();
 
@@ -32,6 +32,9 @@ int16_t rightRange();
  */
 int16_t selectedAngle();
 int16_t selectedRange();
+
+/** Print debug statistics about packet reception and errors */
+void printStats();
 
 /**
  * TEST-ONLY: override the left-camera packet values directly.

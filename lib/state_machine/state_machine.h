@@ -1,3 +1,4 @@
+
 #pragma once
 #include <Arduino.h>
 
@@ -8,6 +9,7 @@ enum class State : uint8_t { IDLE, ACQUIRE, ORBIT, STRIKE };
 void init();   // call once in setup()
 void run();    // call every loop()
 
-State current();  // helper to print/log
+State current();           // get current state enum
+const char* currentName(); // get current state name as string
 
 }  // namespace StateMachine

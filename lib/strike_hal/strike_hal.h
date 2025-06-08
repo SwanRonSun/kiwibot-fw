@@ -15,8 +15,20 @@ void init();
 bool fire();
 
 /**
- * Must be called every loop() to update cooldown timer.
+ * Must be called every loop() to update cooldown timer
+ * and handle strike pulse duration.
  */
 void poll();
+
+/**
+ * Check if the strike system is ready to fire
+ * (not in cooldown and not currently striking).
+ */
+bool isReady();
+
+/**
+ * Get total number of strikes executed since boot.
+ */
+uint32_t getStrikeCount();
   
 } // namespace StrikeHal
