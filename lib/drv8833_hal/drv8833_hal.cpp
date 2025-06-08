@@ -10,17 +10,13 @@ void DrvHal::setWheelSpeeds(const int8_t pwm[3]) {
   memcpy(pending, pwm, 3);
 }
 
+#include <stdio.h>   // ‼️ add at top of file if not present
+
 void DrvHal::updateOutputs() {
-  char buf[40];
-	snprintf(buf, sizeof(buf),
-        	"Wheels PWM = [%+4d %+4d %+4d]\n",
-         pending[0], pending[1], pending[2]);
-Serial.print(buf);        // works on every Arduino core
-
+  char buf[48];
+  snprintf(buf, sizeof(buf),
+           "Wheels PWM = [%+4d %+4d %+4d]\n",
+           pending[0], pending[1], pending[2]);
+  Serial.print(buf);
 }
 
-void DrvHal::stop() {
-  int8_t z[3] = {0,0,0};
-  setWheelSpeeds(z);
-  updateOutputs();
-}
